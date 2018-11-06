@@ -213,13 +213,13 @@ doStart(){
     fi
     # 2. start item
     startCommand="${basePath}/vendor/uniondrug/server/server"
-    cd ${basePath}
+    cd ${basePath} && chown -R {{OWNER}} .
     if [ ! -e "${startCommand}" ]; then
         echo "[启动错误] - Composer未导入依赖uniondrug/server."
         return 2
     fi
     # 3. 启动服务
-    su-exec {{OWNER}} php server start -e ${userEnvrionment} -d > /dev/null
+    su-exec {{OWNER}} php ${startCommand} start -e ${userEnvrionment} -d > /dev/null
     # 4. 读取进程
     num=$(ps aux | grep ${userServiceName} | grep -v grep | awk '{print $1}' | wc -l)
     if [ ${num} -lt 1 ]; then
