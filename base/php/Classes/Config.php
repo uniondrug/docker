@@ -72,7 +72,7 @@ class Config extends Console
         if ($host && preg_match("/:(\d+)/", $host, $m)) {
             return $m[1];
         }
-        return "80";
+        return 0;
     }
 
     /**

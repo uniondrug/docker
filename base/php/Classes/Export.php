@@ -100,7 +100,15 @@ TMP;
         $consulData['Name'] = $this->config->getName();
         $consulData['Address'] = isset($consulData['Address']) && $consulData['Address'] !== '' ? $consulData['Address'] : '{{CONSUL_ADDRESS}}';
         $consulData['Port'] = isset($consulData['Port']) && is_numeric($consulData['Port']) && $consulData['Port'] > 0 ? (int) $consulData['Port'] : 0;
-        // 3. 导出模板
+        // 3. TAGS数据
+        $consulData['Tags'] = isset($consulData['Tags']) && is_array($consulData['Tags']) ? $consulData['Tags'] : [];
+        // 3.1 镜像名
+        $image = 'image:'.$this->config->getImage();
+        in_array($image, $consulData['Tags']) || $consulData['Tags'][] = $image;
+        // 3.2 模式
+        $mode = $this->config->getMode();
+        in_array($mode, $consulData['Tags']) || $consulData['Tags'][] = $mode;
+        // 4. 导出模板
         $tpl = <<<'TMP'
 # Consul配置
 userConsulData="{{CONSUL_DATA}}"
@@ -149,9 +157,12 @@ if [ -z "${userServiceIp}" ] ; then
 fi
 # service:Port
 if [ -z "${userServicePort}" ] ; then
-    userServicePort="{{SERVICE_PORT}}"
+    userServicePort="${SERVICE_PORT}"
     if [ -z "${userServicePort}" ] ; then
-        userServicePort="80"
+        userServicePort="{{SERVICE_PORT}}"
+        if [ -z "${userServicePort}" -o "0" = "${userServicePort}" ] ; then
+            userServicePort="80"
+        fi
     fi
 fi
 TMP;
@@ -308,10 +319,12 @@ doRegister(){
         return 1
     fi
     # 2. consul data
-    echo ${userConsulData} > {{BASE_PATH}}/consul.json
+    echo -e "#!/bin/sh\ncurl --request PUT --data '${userConsulData}' http://${userConsulIp}:${userConsulPort}/v1/agent/service/register" > {{BASE_PATH}}/consul.sh
     echo "[发起注册] - 请求[http://${userConsulIp}:${userConsulPort}/v1/agent/service/register]发起注册"
     echo "[服务参数] - ${userConsulData}"
-    curlResponse=$(curl -IsS --request PUT --data @{{BASE_PATH}}/consul.json --url "http://${userConsulIp}:${userConsulPort}/v1/agent/service/register")    
+    curlResponse=$(bash {{BASE_PATH}}/consul.sh)
+    #rm -f {{BASE_PATH}}/consul.sh
+    return 0
     # 2.1 http code
     bashHttpCode='$e = "/HTTP\/\d+\.\d+\s+(\d+)/i"; $s = "'$curlResponse'"; echo preg_match($e, $s, $m) > 0 ? $m[1] : "";'
     userHttpCode=$(php -r "${bashHttpCode}")
