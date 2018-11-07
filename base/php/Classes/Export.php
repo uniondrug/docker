@@ -113,7 +113,7 @@ TMP;
 # Consul配置
 userConsulData="{{CONSUL_DATA}}"
 userConsulData=${userConsulData/\"Port\":0/\"Port\":${userServicePort}}
-userConsulData=${userConsulData/\{\{CONSUL_ADDRESS\}\}/${userConsulIp}}
+userConsulData=${userConsulData/\{\{CONSUL_ADDRESS\}\}/${userServiceIp}}
 userConsulData=${userConsulData/\{\{ENVIRONMENT\}\}/${userEnvrionment}}
 TMP;
         return preg_replace([
