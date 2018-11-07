@@ -253,7 +253,7 @@ doStart(){
         return 2
     fi
     # 3. 启动服务
-    su-exec {{OWNER}} php ${startCommand} start --port 8080 -e ${userEnvrionment}
+    su-exec {{OWNER}} php ${startCommand} start --ipaddr 0.0.0.0 --port 8080 -e ${userEnvrionment}
     return 3
 }
 TMP;
