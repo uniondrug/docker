@@ -10,8 +10,8 @@
 class Config extends Console
 {
     const DEFAULT_DOCKER_IMAGE = "uniondrug:base";
-    const DEFAULT_DOCKER_MODE = "swoole";
     const DEFAULT_DOCKER_NAME = "sketch";
+    const DEFAULT_SERVICE_MODE = "swoole";
     private $base;
     private $configData = null;
     private $configEnvironment = null;
@@ -55,7 +55,7 @@ class Config extends Console
     public function getMode()
     {
         $mode = $this->get('app.dockerMode');
-        $mode || $mode = self::DEFAULT_DOCKER_MODE;
+        $mode || $mode = self::DEFAULT_SERVICE_MODE;
         return $mode;
     }
 

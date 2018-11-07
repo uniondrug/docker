@@ -103,7 +103,7 @@ TMP;
         // 3. TAGS数据
         $consulData['Tags'] = isset($consulData['Tags']) && is_array($consulData['Tags']) ? $consulData['Tags'] : [];
         // 3.1 镜像名
-        $image = 'image:'.$this->config->getImage();
+        $image = '{{ENVIRONMENT}}:'.$this->config->getImage();
         in_array($image, $consulData['Tags']) || $consulData['Tags'][] = $image;
         // 3.2 模式
         $mode = $this->config->getMode();
@@ -114,6 +114,7 @@ TMP;
 userConsulData="{{CONSUL_DATA}}"
 userConsulData=${userConsulData/\"Port\":0/\"Port\":${userServicePort}}
 userConsulData=${userConsulData/\{\{CONSUL_ADDRESS\}\}/${userConsulIp}}
+userConsulData=${userConsulData/\{\{ENVIRONMENT\}\}/${userEnvrionment}}
 TMP;
         return preg_replace([
             "/\{\{CONSUL_DATA\}\}/"
@@ -126,36 +127,60 @@ TMP;
      * 安装时终级环境变量
      * @return string
      */
-    protected function renderInstallVariables()
+    protected function renderDefaultArguments()
     {
         $tpl = <<<'TMP'
-# action
+# 默认操作类型/优先级
+# 1. SHELL入参
+# 2. start
 if [ -z "${userAction}" ] ; then
     userAction="start"
 fi
-# environment
+# 默认环境变量/优先级
+# 1. SHELL入参
+# 2. DOCKER_ENVIRONMENT环境变量值
+# 3. testing
 if [ -z "${userEnvrionment}" ] ; then
     userEnvrionment="${DOCKER_ENVIRONMENT}"
     if [ -z "${userEnvrionment}" ] ; then
-        userEnvrionment="development"
+        userEnvrionment="testing"
     fi
 fi
-# consul:IP
+# Consul地址/优先级
+# 1. SHELL入参
+# 2. CONSUL_IP环境变量值
 if [ -z "${userConsulIp}" ] ; then
     userConsulIp="${CONSUL_IP}"
 fi
-# consul:Port
+# Consul端口/优先级
+# 1. SHELL入参
+# 2. CONSUL_PORT环境变量值
+# 3. 8500
 if [ -z "${userConsulPort}" ] ; then
     userConsulPort="${CONSUL_PORT}"
-fi
-# service:IP
-if [ -z "${userServiceIp}" ] ; then
-    userServiceIp=$(ip -o -4 addr list eth0 | head -n1 | awk '{print $4}' | cut -d/ -f1)
-    if [ -z "${userServiceIp}" ] ; then
-        userServiceIp="127.0.0.1"
+    if [ -z "${userConsulPort}" ] ; then
+        userConsulPort="8500"
     fi
 fi
-# service:Port
+# 服务地址/优先级
+# 1. SHELL入参
+# 2. SERVICE_IP环境变量值
+# 3. 网卡IP
+# 4. 127.0.0.1
+if [ -z "${userServiceIp}" ] ; then
+    userServiceIp="${SERVICE_IP}"
+    if [ -z "${userServiceIp}" ] ; then
+        userServiceIp=$(ip -o -4 addr list eth0 | head -n1 | awk '{print $4}' | cut -d/ -f1)
+        if [ -z "${userServiceIp}" ] ; then
+            userServiceIp="127.0.0.1"
+        fi
+    fi
+fi
+# 服务端口/优先级
+# 1. SHELL入参
+# 2. SERVICE_PORT环境变量值
+# 3. 项目配置/config.server.host
+# 4. 80
 if [ -z "${userServicePort}" ] ; then
     userServicePort="${SERVICE_PORT}"
     if [ -z "${userServicePort}" ] ; then
@@ -182,29 +207,12 @@ TMP;
         $tpl = <<<'TMP'
 # 按动作名称选择操作方式
 if [ "start" = "${userAction}" ] ; then
+    doRegister
     doStart
-    _s=$?
-    if [ 0 -eq ${_s} ] ; then
-        doRegister
-        _r=$?
-        if [ ${_r} -gt 0 ] ; then
-            echo "[注册编码] - 注册失败返回[${_r}]状态码"
-        fi
-    else
-        echo "[启动编码] - 启动失败返回[${_s}]状态码"
-    fi
+    doDeregister
 elif [ "stop" = "${userAction}" ] ; then
     doStop
-    _s=$?
-    if [ 0 -eq ${_s} ] ; then
-        doDeregister
-        _r=$?
-        if [ ${_r} -gt 0 ] ; then
-            echo "[取消编码] - 取消注册失败返回[${_r}]状态码"
-        fi
-    else
-        echo "[停止编码] - 停止失败返回[${_s}]状态码"
-    fi
+    doDeregister
 else 
     echo "[出现错误] - 未知的操作类型"
     exit 1
@@ -245,16 +253,8 @@ doStart(){
         return 2
     fi
     # 3. 启动服务
-    su-exec {{OWNER}} php ${startCommand} start -e ${userEnvrionment} -d > /dev/null
-    # 4. 读取进程
-    num=$(ps aux | grep ${userServiceName} | grep -v grep | wc -l)
-    if [ ${num} -lt 1 ]; then
-        echo "[启动错误] - 未找到已启动的守护进程."
-        return 3
-    fi
-    # 5. 完成启动
-    echo "[启动成功] - 成功启动[${userServiceName}]项目."
-    return 0
+    su-exec {{OWNER}} php ${startCommand} start --port 80 -e ${userEnvrionment}
+    return 3
 }
 TMP;
         return preg_replace([
@@ -318,13 +318,16 @@ doRegister(){
         echo "[忽略服务] - Consul服务中心的IP或端口未定义"
         return 1
     fi
-    # 2. consul data
-    echo -e "#!/bin/sh\ncurl --request PUT --data '${userConsulData}' http://${userConsulIp}:${userConsulPort}/v1/agent/service/register" > {{BASE_PATH}}/consul.sh
+    # 2. 写入执行语句
+    shellFile="{{BASE_PATH}}/consul.sh"
+    echo "#!/bin/sh" > ${shellFile}
+    echo "curl -isS --request PUT \\" >> ${shellFile}
+    echo "     --data '${userConsulData}' \\" >> ${shellFile}
+    echo "     http://${userConsulIp}:${userConsulPort}/v1/agent/service/register" >> ${shellFile}
     echo "[发起注册] - 请求[http://${userConsulIp}:${userConsulPort}/v1/agent/service/register]发起注册"
     echo "[服务参数] - ${userConsulData}"
-    curlResponse=$(bash {{BASE_PATH}}/consul.sh)
-    #rm -f {{BASE_PATH}}/consul.sh
-    return 0
+    echo "[注册脚本] - ${shellFile}"
+    curlResponse=$(bash ${shellFile})
     # 2.1 http code
     bashHttpCode='$e = "/HTTP\/\d+\.\d+\s+(\d+)/i"; $s = "'$curlResponse'"; echo preg_match($e, $s, $m) > 0 ? $m[1] : "";'
     userHttpCode=$(php -r "${bashHttpCode}")
@@ -367,7 +370,7 @@ doDeregister(){
     # 1. required consul variables
     if [ -z "${userConsulIp}" -o -z "${userConsulPort}" ] ; then
         echo "[忽略服务] - Consul服务中心的IP或端口未定义"
-        return 1
+        return 0
     fi
     # 2. consul data
     echo "[取消注册] - 请求[http://${userConsulIp}:${userConsulPort}/v1/agent/service/deregister]取消注册"
@@ -381,7 +384,7 @@ doDeregister(){
     # 3. 取消失败
     if [ -z "${userHttpCode}" ]; then
         echo "[取消失败] - ${curlResponse}"
-        return 2
+        return 1
     fi
     # 4. 取消成功
     if [ "200" = "${userHttpCode}" ] ; then
@@ -390,7 +393,7 @@ doDeregister(){
     fi
     # 5. 取消失败
     echo "[取消失败] - ${userHttpText}"
-    return 3
+    return 2
 }
 TMP;
         return $tpl;

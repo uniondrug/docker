@@ -35,7 +35,7 @@ class ExportInstall extends Export
         $this->appendDoStop();
         $this->appendDoRegister();
         $this->appendDoDeregister();
-        // 3. switch
+        //        // 3. switch
         $this->appendDebugger();
         $this->appendSwitch();
         // 4. 导出Shell文件
@@ -84,13 +84,13 @@ class ExportInstall extends Export
     }
 
     /**
-     * 加入Shell头
+     * 加入Shell变量
      * @return $this
      */
     private function appendVariables()
     {
         $this->debug("添加变量信息");
-        $this->appendSeparator()->append($this->renderShellArguments())->append($this->renderInstallVariables());
+        $this->appendSeparator()->append($this->renderShellArguments())->appendSeparator()->append($this->renderDefaultArguments());
         return $this;
     }
 
