@@ -10,7 +10,7 @@
 class ExportInstall extends Export
 {
     private $entrypoint = '';
-    private $saveAs = 'shell.sh';
+    private $saveAs = 'entrypoint';
 
     /**
      * ExportInstall constructor.

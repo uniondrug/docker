@@ -86,16 +86,21 @@ TMP;
      */
     protected function renderConsulData()
     {
+        // 1. 读Consul配置
         $consulData = [];
         $consulFile = $this->base->getBasePath().'/consul.json';
         if (file_exists($consulFile)) {
             $consulJson = file_get_contents($consulFile);
             $consulTemp = json_decode($consulJson, JSON_UNESCAPED_UNICODE);
-            $consulTemp['Name'] = $this->config->getName();
-            $consulTemp['Address'] = isset($consulTemp['Address']) && $consulTemp['Address'] !== '' ? $consulTemp['Address'] : '{{CONSUL_ADDRESS}}';
-            $consulTemp['Port'] = isset($consulTemp['Port']) && is_numeric($consulTemp['Port']) && $consulTemp['Port'] > 0 ? (int) $consulTemp['Port'] : 0;
-            $consulData = $consulTemp;
+            if (is_array($consulTemp)) {
+                $consulData = $consulTemp;
+            }
         }
+        // 2. 重Consul参数
+        $consulData['Name'] = $this->config->getName();
+        $consulData['Address'] = isset($consulData['Address']) && $consulData['Address'] !== '' ? $consulData['Address'] : '{{CONSUL_ADDRESS}}';
+        $consulData['Port'] = isset($consulData['Port']) && is_numeric($consulData['Port']) && $consulData['Port'] > 0 ? (int) $consulData['Port'] : 0;
+        // 3. 导出模板
         $tpl = <<<'TMP'
 # Consul配置
 userConsulData="{{CONSUL_DATA}}"
@@ -116,6 +121,10 @@ TMP;
     protected function renderInstallVariables()
     {
         $tpl = <<<'TMP'
+# action
+if [ -z "${userAction}" ] ; then
+    userAction="start"
+fi
 # environment
 if [ -z "${userEnvrionment}" ] ; then
     userEnvrionment="${DOCKER_ENVIRONMENT}"
@@ -164,20 +173,26 @@ TMP;
 if [ "start" = "${userAction}" ] ; then
     doStart
     _s=$?
-    echo "[启动应用] - 返回[$_s]号状态码"
     if [ 0 -eq ${_s} ] ; then
         doRegister
         _r=$?
-        echo "[注册服务] - 返回[$_r]号状态码"
+        if [ ${_r} -gt 0 ] ; then
+            echo "[注册编码] - 注册失败返回[${_r}]状态码"
+        fi
+    else
+        echo "[启动编码] - 启动失败返回[${_s}]状态码"
     fi
 elif [ "stop" = "${userAction}" ] ; then
     doStop
     _s=$?
-    echo "[停止应用] - 返回[$_s]号状态码"
     if [ 0 -eq ${_s} ] ; then
         doDeregister
         _r=$?
-        echo "[取消服务] - 返回[$_r]号状态码"
+        if [ ${_r} -gt 0 ] ; then
+            echo "[取消编码] - 取消注册失败返回[${_r}]状态码"
+        fi
+    else
+        echo "[停止编码] - 停止失败返回[${_s}]状态码"
     fi
 else 
     echo "[出现错误] - 未知的操作类型"
@@ -206,8 +221,8 @@ TMP;
 # 启动应用服务
 doStart(){
     # 1. started or not
-    pids=$(ps aux | grep ${userServiceName} | grep -v grep | awk '{print $1}')
-    if [ -n "${pids}" ]; then
+    has=$(ps aux | grep ${userServiceName} | grep -v grep | wc -l)
+    if [ "${has}" -lt 0 ]; then
         echo "[启动错误] - 服务已启动, 请先执行stop停止服务."
         return 1
     fi
@@ -221,7 +236,7 @@ doStart(){
     # 3. 启动服务
     su-exec {{OWNER}} php ${startCommand} start -e ${userEnvrionment} -d > /dev/null
     # 4. 读取进程
-    num=$(ps aux | grep ${userServiceName} | grep -v grep | awk '{print $1}' | wc -l)
+    num=$(ps aux | grep ${userServiceName} | grep -v grep | wc -l)
     if [ ${num} -lt 1 ]; then
         echo "[启动错误] - 未找到已启动的守护进程."
         return 3
@@ -232,9 +247,9 @@ doStart(){
 }
 TMP;
         return preg_replace([
-            "/\{\{OWNER\}\}/"
+            "/\{\{OWNER\}\}/",
         ], [
-            $this->base->getOwner()
+            $this->base->getOwner(),
         ], $tpl);
     }
 
@@ -293,14 +308,38 @@ doRegister(){
         return 1
     fi
     # 2. consul data
+    echo ${userConsulData} > {{BASE_PATH}}/consul.json
     echo "[发起注册] - 请求[http://${userConsulIp}:${userConsulPort}/v1/agent/service/register]发起注册"
     echo "[服务参数] - ${userConsulData}"
-    curl --request PUT --data ${userConsulData} --url "http://${userConsulIp}:${userConsulPort}/v1/agent/service/register" > /dev/null
-    echo "[完成注册]"
-    return 0
+    curlResponse=$(curl -IsS --request PUT --data @{{BASE_PATH}}/consul.json --url "http://${userConsulIp}:${userConsulPort}/v1/agent/service/register")    
+    # 2.1 http code
+    bashHttpCode='$e = "/HTTP\/\d+\.\d+\s+(\d+)/i"; $s = "'$curlResponse'"; echo preg_match($e, $s, $m) > 0 ? $m[1] : "";'
+    userHttpCode=$(php -r "${bashHttpCode}")
+    # 2.2 http text
+    bashHttpText='$e = "/(HTTP\/\d+\.\d+\s+\d+[^\n]+)/i"; $s = "'$curlResponse'"; echo preg_match($e, $s, $m) > 0 ? $m[1] : "";'
+    userHttpText=$(php -r "${bashHttpText}")
+    # 3. 注册失败
+    if [ -z "${userHttpCode}" ]; then
+        echo "[注册失败] - ${curlResponse}"
+        return 2
+    fi
+    # 4. 注册成功
+    if [ "200" = "${userHttpCode}" ] ; then
+        echo "[注册成功] - ${userHttpText}"
+        return 0
+    fi
+    # 5. 注册失败
+    echo "[注册失败] - ${userHttpText}"
+    return 3
 }
 TMP;
-        return $tpl;
+        return preg_replace([
+            "/\{\{OWNER\}\}/",
+            "/\{\{BASE_PATH\}\}/"
+        ], [
+            $this->base->getOwner(),
+            $this->base->getBasePath()
+        ], $tpl);
     }
 
     /**
@@ -312,6 +351,11 @@ TMP;
         $tpl = <<<'TMP'
 # 取消服务注册
 doDeregister(){
+    # 1. required consul variables
+    if [ -z "${userConsulIp}" -o -z "${userConsulPort}" ] ; then
+        echo "[忽略服务] - Consul服务中心的IP或端口未定义"
+        return 1
+    fi
     # 2. consul data
     echo "[取消注册] - 请求[http://${userConsulIp}:${userConsulPort}/v1/agent/service/deregister]取消注册"
     curlResponse=$(curl -IsS --request PUT --url "http://${userConsulIp}:${userConsulPort}/v1/agent/service/deregister/${userServiceName}")
