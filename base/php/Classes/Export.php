@@ -180,13 +180,13 @@ fi
 # 1. SHELL入参
 # 2. SERVICE_PORT环境变量值
 # 3. 项目配置/config.server.host
-# 4. 80
+# 4. 8080
 if [ -z "${userServicePort}" ] ; then
     userServicePort="${SERVICE_PORT}"
     if [ -z "${userServicePort}" ] ; then
         userServicePort="{{SERVICE_PORT}}"
         if [ -z "${userServicePort}" -o "0" = "${userServicePort}" ] ; then
-            userServicePort="80"
+            userServicePort="8080"
         fi
     fi
 fi
@@ -253,7 +253,7 @@ doStart(){
         return 2
     fi
     # 3. 启动服务
-    su-exec {{OWNER}} php ${startCommand} start --port 80 -e ${userEnvrionment}
+    su-exec {{OWNER}} php ${startCommand} start --port 8080 -e ${userEnvrionment}
     return 3
 }
 TMP;
